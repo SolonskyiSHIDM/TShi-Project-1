@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telegram Mini App</title>
+    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/fomantic-ui@2.9.3/dist/semantic.min.css">
+    <style>
+        #pageContent {
+            padding-bottom: 100px; /* adjust this value based on the actual height of your bottom menu */
+        }
+        .ui.label {
+            font-size: 0.9em; /* Larger text for better readability */
+        }
+    </style>
+</head>
+<body>
+    <div id="pageContent">
+        <h1 class="ui header">Welcome to My Mini App</h1>
+        <p>This simple page is a starter template for a Telegram Mini App.</p>
+    </div>
+    <div class="ui bottom fixed three item labeled icon menu">
+        <a id="menu" class="item">
+            <i class="circular inverted orange pizza slice icon"></i>
+            Меню</a>
+        <a id="promotions" class="item">
+            <i class="circular inverted red percent icon"></i>
+            Акції</a>
+        <a id="cart" class="item">
+            <i class="circular inverted green shopping cart icon"></i>
+            Корзина</a>
+    </div>
+
+    <div id="menuContent" class="ui container" style="max-width: 100vw; display: none;">
+        <div class="ui stackable grid">
+            <div class="column">
+                <h1 class="ui header">Menu</h1>
+                <p>This is the Menu page.</p>
+                <!-- Dynamic card insertion point -->
+                <div id="productCardsContainer"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="promotionsContent" class="ui container" style="max-width: 100vw; display: none;">
+        <h1 class="ui header">Promotions</h1>
+        <p>Here are the current promotions.</p>
+        <div id="discountCardsContainer"></div>
+
+    </div>
+
+    <div id="cartContent" class="ui container" style="max-width: 100vw; display: none;">
+        <div class="ui stackable grid">
+            <div class="column">
+                <h1 class="ui header">Cart</h1>
+                <div id="productListInCart"></div>
+                <div class="ui fluid card">
+                    <h3 class="ui header">Total: $<span id="cartTotal"></span></h3>
+                    <button class="ui primary button fluid" id="checkoutButton">Place Order</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/fomantic-ui@2.9.3/dist/semantic.min.js"></script>
+    <script>
+        let products = []
+        let exchangeRateUSDToUAH = 0;
+
+        if (!localStorage.getItem('cart')) {
+            localStorage.setItem('cart', JSON.stringify([]));  // Initializes an empty cart
+        }
+
+        function getCart() {
+            return JSON.parse(localStorage.getItem('cart'));
+        }
+
+        function saveCart(cart) {
+            localStorage.setItem('cart', JSON.stringify(cart));
+            updateCartUI(cart);  // Refresh UI whenever the cart is changed
+        }
+
+            $(document).ready(function() {
+                // Function to get the value of a query parameter by name
+                function getQueryParam(name) {
+                    const urlParams = new URLSearchParams(window.location.search);
+                    return urlParams.get(name);
+                }
+
+                // Get the chat_id from the URL
+                const chatId = getQueryParam('chat_id');
+                if (chatId) {
+                    localStorage.setItem('chat_id', chatId);
+                    console.log("Chat ID stored in local storage:", chatId);
+                } else {
+                    console.log("No chat_id found in URL");
+                }
+
+                fetchProducts();
+                fetchExchangeRate()
+
+                $('#menu').click(function() {
+                    var content = $('#menuContent').find('.grid').html();
+                    $('#pageContent').html(content);
+                    renderProducts();
+                });
+
+                $('#promotions').click(function () {
+                    $('#pageContent').html($('#promotionsContent').html());
+                    renderPromotions();
+                });
+
+                $('#cart').click(function() {
+                    $('#pageContent').html($('#cartContent').html());
+                    updateCartUI(getCart());
+                });
+
+                $('#pageContent').on('click', '.addToCart', function() {
+                    let parentCard = $(this).closest('.card');
+                    let pizzaName = parentCard.data('name');
+                    let pizzaPrice = parseFloat(parentCard.data('price'));
+
+                    let cart = getCart();
+                    let pizzaIndex = cart.findIndex(pizza => pizza.name === pizzaName);
+
+                    if (pizzaIndex !== -1) {
+                        cart[pizzaIndex].quantity += 1;
+                    } else {
+                        cart.push({ name: pizzaName, price: pizzaPrice, image: parentCard.data('image'), quantity: 1 });
+                    }
+                    saveCart(cart);
+                    showToast(pizzaName + " added to cart!", 'success');
+                });
+
+                $('#pageContent').on('click', '#checkoutButton', function() {
+                    console.log('Inside order placement process');
+                    // Retrieve chat_id from local storage
+                    const chatId = localStorage.getItem('chat_id');
+
+                    // Retrieve the cart from local storage or state management
+                    const cart = getCart();
+
+                    // Calculate the total amount
+                    const totalAmount = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
+
+                    // Construct the payload
+                    const payload = {
+                        user_id: chatId,
+                        total_amount: totalAmount,
+                        currency: "USD",
+                        items: cart
+                    };
+                    fetch('/api/place-order', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(payload)
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            showToast('Order placed successfully', 'success');
+                            clearCart();
+                            if (Telegram && Telegram.WebApp) {
+                                Telegram.WebApp.close(); // Close the Mini App
+                            }
+                        } else {
+                            showToast('Failed to place order', 'error');
+                        }
+                    })
+                    .catch(error => {
+                        console.error("Error placing the order: ", error);
+                    });
+                });
+
+                // Function to clear the cart
+                function clearCart() {
+                    localStorage.setItem('cart', JSON.stringify([])); // Clear the cart in local storage
+                    updateCartUI([]); // Update the UI to reflect an empty cart
+                }
+
+
+
+                renderProducts(); // Initial call to display products
+            });
+
+        function renderProducts() {
+            let productsHtml = products.map(product => {
+                let priceUSD = product.price;
+                let priceUAH = (priceUSD * exchangeRateUSDToUAH).toFixed(2);
+                let priceDisplay = product.discount ?
+                    `<div class="ui basic tag red label price" data-usd="<del>$${product.price}</del> $${(product.price * (1 - product.discount / 100)).toFixed(2)}" data-uah="<del>₴${priceUAH}</del> ₴${(priceUAH * (1 - product.discount / 100)).toFixed(2)}"><span class="current"><del>$${product.price}</del> $${(product.price * (1 - product.discount / 100)).toFixed(2)}</span></div>` :
+                    `<div class="ui basic tag green label price" data-usd="$${product.price}" data-uah="₴${priceUAH}"><span class="current">$${product.price}</span></div>`;
+
+                return `
+                    <div class="ui fluid card" data-name="${product.name}" data-price="${product.price * (1 - (product.discount || 0) / 100)}" data-image="${product.image}">
+                        <div class="content">
+                            <div class="header">${product.name} ${priceDisplay}</div>
+                        </div>
+                        <img src="${product.image}" alt="${product.name}" class="ui spaced rounded image">
+                        <div class="extra content">
+                            <button class="ui fluid positive button addToCart">Add to Cart</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            $("#productCardsContainer").html(productsHtml);
+        }
+
+        // Update cart UI function to reflect the cart's current state
+        function updateCartUI(cart) {
+            let cartHtml = cart.map(item => `
+                <div class="ui fluid card">
+                    <div class="ui two column grid">
+                        <div class="column">
+                                <img class=" small rounded ui image" src="${item.image}">
+                        </div>
+                        <div class="column">
+                            <div class="content">
+                                <div class="header">
+                                  ${item.name}
+                                </div>
+                                <div class="description">
+                                  $${item.price} x ${item.quantity}
+                                </div>
+                            </div>
+                            <div class="extra">
+                                <button class="ui green button" onclick="increaseQuantity('${item.name}')">+</button>
+                                <div class="ui label">${item.quantity}</div>
+                                <button class="ui red button" onclick="decreaseQuantity('${item.name}')">-</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+            $("#productListInCart").html(cartHtml);
+            updateTotal(cart);
+        }
+
+
+
+        function updateTotal(cart) {
+            let total = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
+            $('#cartTotal').text(total.toFixed(2));
+        }
+
+        function increaseQuantity(name) {
+            let cart = getCart();
+            let item = cart.find(p => p.name === name);
+            if (item) {
+                item.quantity += 1;
+                saveCart(cart);
+            }
+        }
+
+        function decreaseQuantity(name) {
+            let cart = getCart();
+            let item = cart.find(p => p.name === name);
+            if (item && item.quantity > 1) {
+                item.quantity -= 1;
+                saveCart(cart);
+            } else if (item.quantity === 1) {
+                removeItemFromCart(name)
+            }
+        }
+
+        function removeItemFromCart(name) {
+            let cart = getCart();
+            cart = cart.filter(p => p.name !== name);
+            saveCart(cart);
+        }
+
+        $('#promotions').click(function() {
+            let promoContent = $('#promotionsContent').html();
+            $('#pageContent').html(promoContent);
+            renderPromotions();
+        });
+
+        $(document).on('click', '.price', function() {
+            let $current = $(this).find('.current'); // Cache the jQuery object of the current element
+            let usdPrice = $(this).data('usd');
+            let uahPrice = $(this).data('uah');
+        
+            // Determine which price is currently displayed and switch to the other
+            if ($current.html().includes('$')) {
+                // vertical flip out the entire tag
+                $current.parent().transition('vertical flip', function() {
+                    // Change the price and vertical flip in
+                    $current.html(uahPrice);
+                    $current.parent().transition('vertical flip');
+                });
+            } else {
+                // vertical flip out the entire tag
+                $current.parent().transition('vertical flip', function() {
+                    // Change the price and vertical flip in
+                    $current.html(usdPrice);
+                    $current.parent().transition('vertical flip');
+                });
+            }
+        });
+
+        function renderPromotions() {
+            const discountedProducts = products.filter(product => product.discount);
+            let promotionsHtml = discountedProducts.map(product => {
+                let discountPriceUSD = (product.price * (1 - product.discount / 100)).toFixed(2);
+                let originalPriceUAH = (product.price * exchangeRateUSDToUAH).toFixed(2);
+                let discountPriceUAH = (discountPriceUSD * exchangeRateUSDToUAH).toFixed(2);
+
+                return `
+                    <div class="ui fluid card" data-name="${product.name}" data-price="${discountPriceUSD}" data-image="${product.image}">
+                        <div class="content">
+                            <div class="header">${product.name} <div class="ui basic tag red label price" data-usd="<del>$${product.price}</del> $${discountPriceUSD}" data-uah="<del>₴${originalPriceUAH}</del> ₴${discountPriceUAH}"><span class="current"><del>$${product.price}</del> $${discountPriceUSD}</span></div></div>
+                        </div>
+                        <img src="${product.image}" alt="${product.name}" class="ui spaced rounded image">
+                        <div class="extra content">
+                            <button class="ui fluid positive button addToCart">Add to Cart</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            $("#discountCardsContainer").html(promotionsHtml);
+        }
+
+        function fetchProducts() {
+            fetch('/api/products')
+                .then(response => response.json())
+                .then(data => {
+                    products = data;
+                    {#renderProducts();  // Call renderProducts or equivalent function to update your DOM#}
+                });
+        }
+
+        function fetchExchangeRate() {
+            fetch('/api/exchange-rate')
+                .then(response => response.json())
+                .then(data => {
+                    exchangeRateUSDToUAH = data.rate;
+                    console.log("Exchange rate fetched:", exchangeRateUSDToUAH);
+                })
+                .catch(error => {
+                    console.error("Error fetching exchange rate:", error);
+                });
+        }
+
+        function showToast(message, type = 'success') {
+            $('body')
+                .toast({
+                    class: type, // success, info, warning, error
+                    message: message,
+                    showIcon: true,
+                    title: type,
+                    position: 'top attached',
+                    showProgress: 'bottom',
+                    displayTime: 3000
+                });
+        }
+
+    </script>
+</body>
+</html>

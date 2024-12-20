@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Pizza Sales Admin</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fomantic-ui@2.9.3/dist/semantic.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/fomantic-ui@2.9.3/dist/semantic.min.js"></script>
+</head>
+<body>
+<div class="ui grid container">
+    <div class="column">
+        <h1>Pizza Sales Admin Panel</h1>
+        <h2 class="ui horizontal divider header">Manage Pizza Data</h2>
+        <table class="ui celled unstackable table">
+            <thead>
+                <tr><th>Name</th><th>Price</th><th>Discount</th><th>Image Path</th><th>Delete</th></tr>
+            </thead>
+            <tbody id="pizzaData">
+                {% for pizza in pizzas %}
+                <tr>
+                    <td contenteditable="true">{{ pizza['name'] }}</td>
+                    <td contenteditable="true">{{ pizza['price'] }}</td>
+                    <td contenteditable="true">{{ pizza.get('discount', 0) }}%</td>
+                    <td contenteditable="true">{{ pizza.get('image', '/static/default.jpg') }}</td>
+                    <td><button onclick="deleteRow(this)">Delete</button></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <button class="ui button primary" onclick="addRow()">Add Pizza</button>
+        <button class="ui button green" onclick="savePizzas()">Save Changes</button>
+
+        <h2 class="ui horizontal divider header">Sales Prediction</h2>
+        <form class="ui form" id="predictionForm" action="/predict" method="post">
+            <div class="two fields">
+                <div class="field">
+                    <label>Start date</label>
+                    <div class="ui calendar" id="rangestart">
+                        <div class="ui input left icon">
+                            <i class="calendar icon"></i>
+                            <input type="text" name="start" placeholder="Start">
+                        </div>
+                    </div>
+                </div>
+                <div class="field">
+                    <label>End date</label>
+                    <div class="ui calendar" id="rangeend">
+                        <div class="ui input left icon">
+                            <i class="calendar icon"></i>
+                            <input type="text" name="end" placeholder="End">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% for pizza in pizzas %}
+            <div class="field">
+                <label>{{ pizza.name }} Discount (%)</label>
+                <input type="number" name="discount_{{ pizza.name }}" value="0.0" min="0.0" max="0.99" step="0.01" placeholder="Enter Discount for {{ pizza.name }}">
+            </div>
+            {% endfor %}
+            <button class="ui button primary" type="button" onclick="submitForm()">Predict Discounts</button>
+        </form>
+        <div class="ui segment hidden" id="predictionResults" style="display:none;">
+            <h3>Prediction Output</h3>
+            <p id="output"></p>
+        </div>
+    </div>
+</div>
+<script>
+$('#rangestart, #rangeend').calendar({ type: 'date' });
+
+// Script to manage pizza data
+function addRow() {
+    $('#pizzaData').append('<tr><td contenteditable="true">New Name</td><td contenteditable="true">0</td><td contenteditable="true">0</td><td contenteditable="true"></td><td><button onclick="deleteRow(this)">Delete</button></td></tr>');
+}
+
+function deleteRow(btn) {
+    var row = btn.parentNode.parentNode;
+    row.parentNode.removeChild(row);
+}
+
+function savePizzas() {
+    var rows = document.querySelectorAll('#pizzaData tr');
+    var pizzas = [];
+    rows.forEach(row => {
+        var cells = row.querySelectorAll('td');
+        if (cells.length > 1) {
+            pizzas.push({
+                name: cells[0].innerText.trim(),
+                price: parseFloat(cells[1].innerText),
+                discount: parseFloat(cells[2].innerText),
+                image: cells[3].innerText.trim()
+            });
+        }
+    });
+
+    // Sending AJAX with correct settings
+    $.ajax({
+        url: '/update_pizzas',
+        method: 'POST',
+        contentType: 'application/json',
+        processData: false,  // Ensure jQuery does not automatically process data
+        data: JSON.stringify({pizzas: pizzas}),
+        success: function(response) {
+            alert(response.message);
+        },
+        error: function(xhr) {
+            alert('Error: ' + xhr.responseText);
+        }
+    });
+}
+
+// Script to manage predictions
+function submitForm() {
+    $('#predictionResults').fadeOut();
+    // Getting form data as an object
+    var formData = $('#predictionForm').serializeArray().reduce(function(obj, item) {
+        obj[item.name] = item.value;
+        return obj;
+    }, {});
+
+    // Send a POST request with contentType set to 'application/json'
+    $.ajax({
+        url: '/predict',
+        type: 'POST',
+        contentType: 'application/json',  // Ensure the server receives the content type as JSON
+        data: JSON.stringify(formData),   // Convert form data object to JSON string
+        success: function(data) {
+            $('#output').text(JSON.stringify(data));
+            $('#predictionResults').fadeIn();
+        },
+        error: function(xhr, status, error) {
+            $('#output').text('Error: ' + error);
+            $('#predictionResults').fadeIn();
+        }
+    });
+}
+</script>
+</body>
+</html>
